@@ -39,6 +39,9 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSI
 #include "iqconverter_int16.h"
 #include "filters.h"
 
+// XXX: Fo benchmark during development.
+#include <sys/time.h>
+
 #ifndef bool
 typedef int bool;
 #define true 1
@@ -333,6 +336,13 @@ static inline void unpack_samples(uint32_t *input, uint16_t *output, int length)
 	}
 }
 
+// XXX: For benchmark during development.
+static float
+TimevalDiff(const struct timeval *a, const struct timeval *b)
+{
+	return (a->tv_sec - b->tv_sec) + 1e-6f * (a->tv_usec - b->tv_usec);
+}
+
 static void* consumer_threadproc(void *arg)
 {
 	int sample_count;
@@ -365,6 +375,10 @@ static void* consumer_threadproc(void *arg)
 		device->received_samples_queue_tail = (device->received_samples_queue_tail + 1) & (RAW_BUFFER_COUNT - 1);
 
 		pthread_mutex_unlock(&device->consumer_mp);
+
+		// XXX: For benchmark during development.
+		struct timeval t_start;
+		gettimeofday(&t_start, NULL);
 
 		if (device->packing_enabled)
 		{
@@ -416,6 +430,31 @@ static void* consumer_threadproc(void *arg)
 		case AIRSPY_SAMPLE_END:
 			// Just to shut GCC's moaning
 			break;
+		}
+
+		// XXX: For benchmark during development.
+		{
+			struct timeval t_end;
+			gettimeofday(&t_end, NULL);
+			const float time_diff = TimevalDiff(&t_end, &t_start);
+
+			#define N 1024
+			static float times[N] = {0};
+			static int time_index = 0;
+			static float acc = 0.0f;
+			static bool has_enough_statistics = false;
+			acc += time_diff;
+			acc -= times[time_index];
+			times[time_index] = time_diff;
+			++time_index;
+			if (time_index == N) {
+				time_index = 0;
+				has_enough_statistics = true;
+			}
+			if (has_enough_statistics) {
+				fprintf(stderr, "buffer processing time: %5.4f ms\n", (acc / N) * 1000);
+			}
+			#undef N
 		}
 
 		transfer.device = device;
